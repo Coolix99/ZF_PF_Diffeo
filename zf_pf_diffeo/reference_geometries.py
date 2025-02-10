@@ -639,19 +639,22 @@ def create_refGeometry(meshes3d: List[pv.PolyData], n_harmonics=10, n_coords=40)
         n_coords (int): Number of coordinates for inverse transformation.
 
     Returns:
-        tuple: (avg_coeff, avg_mesh), where:
+        tuple: (avg_coeff, (nodes, triangles, boundary_indices))
             - avg_coeff (np.ndarray): Averaged Fourier coefficients.
-            - avg_mesh (tuple): (nodes, triangles) of the averaged 2D mesh.
+            - nodes (ndarray): Nodes of the averaged 2D mesh.
+            - triangles (ndarray): Triangular connectivity.
+            - boundary_indices (ndarray): Indices of boundary nodes.
     """
     all_coeff = [create_2dGeometry(mesh, n_harmonics) for mesh in meshes3d]
     avg_coeff = AverageCoefficients(all_coeff)
     xt, yt = inverse_transform(avg_coeff, harmonic=n_harmonics, n_coords=n_coords)
     avgPolygon = np.stack((xt, yt))
 
-    avg_mesh = generate_2d_mesh(avgPolygon.T)
+    nodes, triangles = generate_2d_mesh(avgPolygon.T)
+    boundary_indices = get_boundary_indices(nodes, avgPolygon.T)  # Extract boundary indices
 
     logger.info(f"Created reference geometry using {len(meshes3d)} meshes.")
-    return avg_coeff, avg_mesh
+    return avg_coeff, (nodes, triangles, boundary_indices)
 
 def interpolate_coefficients(ref_coeffs):
     """
@@ -792,4 +795,82 @@ def solve_laplace(nodes, triangles, boundary_indices, boundary_displacement):
         displacement[free_indices, dim] = spsolve(K_free, rhs)
 
     return displacement
+
+def transfer_data_to_reference(nodes, triangles,boundaries, mesh_3d:pv.PolyData,n_harmonics=10,n_coords=40):
+    """
+    Transfers point data from a deformed 3D surface to the reference 2D shape.
+
+    Args:
+        nodes (ndarray): 2D reference nodes.
+        triangles (ndarray): Triangulation of the reference mesh.
+        boundary (ndarray): Indices of the boundary nodes.
+        mesh_3d (pv.PolyData): The original 3D mesh.
+
+    Returns:
+        dict: A dictionary mapping feature names to transported data.
+    """
+    # Extract boundary polygon from 3D mesh
+    polygon = getPolygon(mesh_3d)
+    centroid = centroid_Polygon(polygon[0, :], polygon[1, :])
+    
+    coeff = getCoeff(polygon, n_harmonics)
+    x0=np.sum(coeff[:,2])
+    y0=np.sum(coeff[:,0])
+
+    theta=np.arctan2(y0, x0)
+    coeff_shift=shift_coeff(coeff,-theta)
+    xt, yt = spatial_efd.inverse_transform(coeff_shift, harmonic=n_harmonics,n_coords=n_coords)
+
+
+    # Compute the displacement for the boundary nodes
+    boundary_displacement = np.stack((xt, yt)).T - nodes[boundaries]
+    # Solve Laplace equation to propagate the displacement to the interior nodes
+    displacement = solve_laplace(nodes, triangles, boundaries, boundary_displacement)
+    # Apply the displacement to the nodes
+    nodes_displaced =nodes.copy() + displacement + centroid
+
+
+    # Build KDTree for nearest neighbor search
+    mesh_coords = np.column_stack((mesh_3d.point_data["coord_1"], mesh_3d.point_data["coord_2"]))
+
+    # # 🔹 **Debugging Plots**
+    # import matplotlib.pyplot as plt
+    # plt.figure(figsize=(8, 8))
+    
+    # # Plot Original Nodes
+    # plt.scatter(nodes[:, 0], nodes[:, 1], color='blue', label="Original Nodes", alpha=0.5)
+    
+    # # Plot Displaced Nodes
+    # plt.scatter(nodes_displaced[:, 0], nodes_displaced[:, 1], color='red', label="Displaced Nodes", alpha=0.5)
+    
+    # # Plot Mesh Coordinates
+    # plt.scatter(mesh_coords[:, 0], mesh_coords[:, 1], color='green', label="Mesh Coordinates", marker='x', alpha=0.5)
+
+    # # Titles and Legends
+    # plt.title("Debugging Visualization: Nodes & Mesh Coordinates")
+    # plt.xlabel("X Coordinates")
+    # plt.ylabel("Y Coordinates")
+    # plt.legend()
+    # plt.axis('equal')
+    # plt.show()
+
+
+    kdtree = cKDTree(nodes_displaced)
+
+    # Find nearest neighbors
+    distances, indices = kdtree.query(mesh_coords)
+    return indices
+    print(indices.shape, np.max(indices))
+    print(mesh_coords.shape)
+    print(nodes_displaced.shape)
+    # Transfer data
+    data_dict = {}
+    for key in mesh_3d.point_data.keys():
+        raw_data = np.array(mesh_3d.point_data[key])
+        data_dict[key] = None
+
+        print(data_dict[key])
+    raise
+
+    return data_dict
 

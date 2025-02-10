@@ -5,13 +5,10 @@ import pyvista as pv
 import logging
 from tqdm import tqdm
 from collections import defaultdict
-import pickle
 
 from zf_pf_geometry.utils import make_path
 from zf_pf_geometry.metadata_manager import should_process, write_JSON, get_JSON, calculate_dict_checksum
-from zf_pf_diffeo.reference_geometries import create_refGeometry, create_TempRefGeometry
-
-
+from zf_pf_diffeo.reference_geometries import create_refGeometry, create_TempRefGeometry,transfer_data_to_reference
 
 
 logger = logging.getLogger(__name__)
@@ -58,9 +55,17 @@ def should_process_group(group, metadata_map, output_dir, output_key):
     
     return input_data, input_files, input_data_checksum
 
-def save_2d_mesh(nodes, triangles, file_path):
-    """Saves a 2D mesh consisting of nodes and triangles to a .npz file."""
-    np.savez(file_path, nodes=nodes, triangles=triangles)
+def save_2d_mesh(nodes, triangles, boundary_indices, file_path):
+    """
+    Saves a 2D mesh consisting of nodes, triangles, and boundary indices to a .npz file.
+
+    Args:
+        nodes (ndarray): Array of shape (N, 2) containing mesh node coordinates.
+        triangles (ndarray): Array of shape (M, 3) defining mesh connectivity.
+        boundary_indices (ndarray): Indices of boundary nodes.
+        file_path (str): Path to save the .npz file.
+    """
+    np.savez(file_path, nodes=nodes, triangles=triangles, boundary_indices=boundary_indices)
     logger.info(f"Saved 2D mesh to {file_path}")
 
 def do_referenceGeometries(surface_dir, category_keys, output_dir):
@@ -94,10 +99,12 @@ def do_referenceGeometries(surface_dir, category_keys, output_dir):
         
         # Process reference geometries
         meshes3d = [pv.read(os.path.join(surface_dir, name, input_files[name])) for name in group]
-        avg_coeff, (nodes, triangles) = create_refGeometry(meshes3d, n_harmonics=10, n_coords=40)
-        
+    
+        avg_coeff, (nodes, triangles, boundary_indices) = create_refGeometry(meshes3d, n_harmonics=10, n_coords=40)
+
         ref_mesh_file = os.path.join(paths["output"], f"{representative_name}_ref.npz")
-        save_2d_mesh(nodes, triangles, ref_mesh_file)
+        save_2d_mesh(nodes, triangles, boundary_indices, ref_mesh_file)
+
         
         file_paths = {
             "Reference Geometry": ref_mesh_file, 
@@ -120,22 +127,31 @@ def do_referenceGeometries(surface_dir, category_keys, output_dir):
     
     logger.info("Reference geometry processing completed.")
 
-
-def save_interpolated_data(interpolated_nodes, output_dir):
+def save_interpolated_data(interpolated_nodes, last_mesh, output_path, last_mesh_file):
     """
-    Saves interpolated mesh data for all time steps.
+    Saves interpolated node positions and last mesh (triangles) for reference geometry.
 
     Args:
-        interpolated_nodes (dict): Dictionary {time: nodes}.
-        output_dir (str): Directory to save data.
+        interpolated_nodes (dict): {time: deformed_mesh_nodes}
+        last_mesh (tuple): (nodes, triangles) from the last time step
+        output_path (str): Path to save interpolated data
+        last_mesh_file (str): Path to save last mesh triangulation
     """
-    os.makedirs(output_dir, exist_ok=True)
-    file_path = os.path.join(output_dir, "interpolated_nodes.pkl")
+    os.makedirs(output_path, exist_ok=True)
 
-    with open(file_path, 'wb') as f:
-        pickle.dump(interpolated_nodes, f)
+    # Convert time keys to strings to avoid TypeError
+    interpolated_nodes_str_keys = {str(time): nodes for time, nodes in interpolated_nodes.items()}
 
-    logger.info(f"Saved interpolated nodes to {file_path}")
+    # Save interpolated nodes
+    nodes_file = os.path.join(output_path, "interpolated_nodes.npz")
+    np.savez(nodes_file, **interpolated_nodes_str_keys)
+
+    # Save last mesh separately (nodes & triangles)
+    nodes, triangles = last_mesh
+    np.savez(last_mesh_file, nodes=nodes, triangles=triangles)
+
+    logger.info(f"Saved interpolated nodes to {nodes_file}")
+    logger.info(f"Saved last mesh to {last_mesh_file}")
 
 def do_temporalreferenceGeometries(surfaces2d_dir, time_key, category_keys, output_dir):
     """
@@ -148,7 +164,6 @@ def do_temporalreferenceGeometries(surfaces2d_dir, time_key, category_keys, outp
         output_dir (str): Directory to save interpolated geometries.
     """
     logger.info("Processing temporal reference geometries.")
-    base_dirs = {"surfaces2d": surfaces2d_dir, "output": output_dir}
 
     surface_folders = [
         item for item in os.listdir(surfaces2d_dir) if os.path.isdir(os.path.join(surfaces2d_dir, item))
@@ -207,12 +222,14 @@ def do_temporalreferenceGeometries(surfaces2d_dir, time_key, category_keys, outp
         interpolated_nodes,last_mesh = create_TempRefGeometry(ref_coeffs,times)
 
 
-        # Save interpolated data
-        save_interpolated_data(interpolated_nodes, paths["output"])
+        # Save interpolated data along with last_mesh
+        last_mesh_file = os.path.join(paths["output"], "last_mesh.npz")
+        save_interpolated_data(interpolated_nodes, last_mesh, paths["output"], last_mesh_file)
 
         # Update metadata
         res_MetaData = {
             "input_data_checksum": input_checksum,
+            "last_mesh_file": last_mesh_file,
         }
         write_JSON(paths["output"], "temporal_reference_geometry", res_MetaData)
 
@@ -220,40 +237,128 @@ def do_temporalreferenceGeometries(surfaces2d_dir, time_key, category_keys, outp
     
     logger.info("Temporal reference geometry processing completed.")
 
-
-def do_HistPointData(surface_dir, surfaces2d_dir, category_keys, output_dir):
+def get_reference_geometry(reference_dir, category_keys, metadata):
     """
-    Generates histograms from point data projected onto deformed 2D surfaces.
-    
+    Finds the correct reference geometry file based on metadata.
+
     Args:
-        surface_dir (str): Directory with original 3D surface data.
-        surfaces2d_dir (str): Directory with processed 2D surfaces.
+        reference_dir (str): Path where reference geometries are stored.
+        category_keys (list): Keys used for grouping.
+        metadata (dict): Metadata from the current 3D surface.
+
+    Returns:
+        tuple: (reference nodes, reference triangles, boundary indices) if found, else (None, None, None).
+    """
+    key_tuple = tuple(metadata["Thickness_MetaData"].get(k, "MISSING") for k in category_keys)
+    reference_name = "_".join(map(str, key_tuple))
+    ref_file = os.path.join(reference_dir, reference_name, f"{reference_name}_ref.npz")
+
+    if not os.path.exists(ref_file):
+        logger.warning(f"Reference geometry not found for {reference_name}")
+        return None, None, None
+
+    ref_data = np.load(ref_file)
+    return ref_data["nodes"], ref_data["triangles"], ref_data["boundary_indices"],reference_name
+
+
+def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir):
+    """
+    Projects 3D point data onto deformed 2D reference surfaces.
+
+    Args:
+        surface_dir (str): Directory containing 3D surfaces.
+        reference_dir (str): Directory containing computed 2D reference geometries.
         category_keys (list): Keys used for grouping data.
-        output_dir (str): Output directory.
+        output_dir (str): Path to save processed histograms.
     """
     logger.info("Processing histogram point data.")
-    base_dirs = {"surface": surface_dir, "surfaces2d": surfaces2d_dir, "output": output_dir}
 
     surface_folders = [
         item for item in os.listdir(surface_dir) if os.path.isdir(os.path.join(surface_dir, item))
     ]
 
-    for data_name in tqdm(surface_folders, desc="Processing histograms", unit="dataset"):
-        paths = setup_folders(base_dirs, data_name)
+    hist_map = {}
 
-        res = should_process([paths["surface"], paths["surfaces2d"]], ["surface", "surfaces2d"], paths["output"], "histogram_data")
-        if not res:
-            logger.info(f"Skipping {data_name}: No processing needed.")
+    for data_name in tqdm(surface_folders, desc="Processing histograms", unit="dataset"):
+        surface_path = os.path.join(surface_dir, data_name)
+        metadata = get_JSON(surface_path)
+
+        if not metadata or "Thickness_MetaData" not in metadata:
+            logger.warning(f"Skipping {data_name}: Missing metadata")
             continue
 
-        input_data, input_checksum = res
+        ref_nodes, ref_triangles, ref_boundaries, reference_name = get_reference_geometry(reference_dir, category_keys, metadata)
+        if ref_nodes is None:
+            continue
 
-        # TODO: Implement point projection and histogram computation
+        mesh_3d = pv.read(os.path.join(surface_path, metadata["Thickness_MetaData"]["Surface file"]))
 
-        res_MetaData = update_metadata(input_data["surface"], {}, input_checksum)
-        write_JSON(paths["output"], "histogram_data", res_MetaData)
+        # Get indices mapping 3D points to reference nodes
+        indices = transfer_data_to_reference(ref_nodes, ref_triangles, ref_boundaries, mesh_3d)
+
+        # Initialize storage for a new reference group if not exists
+        if reference_name not in hist_map:
+            hist_map[reference_name] = {
+                "ref_nodes": ref_nodes,
+                "data": defaultdict(lambda: defaultdict(list))  # {feature: {node_idx: [values]}}
+            }
+
+        # Iterate through all point data keys
+        for key in mesh_3d.point_data.keys():
+            values = np.array(mesh_3d.point_data[key])
+
+            # Assign values to corresponding reference nodes
+            for i, node_idx in enumerate(indices):
+                hist_map[reference_name]["data"][key][node_idx].append(values[i])
+
+    # Process collected data into histograms and statistics
+    for reference_name, ref_data in hist_map.items():
+        ref_nodes = ref_data["ref_nodes"]
+        processed_data = {}
+
+        for key, node_dict in ref_data["data"].items():
+            node_values = []
+            node_counts = []
+            node_means = []
+            node_stds = []
+
+            for node_idx in range(len(ref_nodes)):  # Ensure ordering
+                values = node_dict.get(node_idx, [])
+
+                if values:
+                    values = np.array(values)
+                    node_values.append(values)
+                    node_counts.append(len(values))
+                    node_means.append(np.mean(values))
+                    node_stds.append(np.std(values))
+                else:
+                    node_values.append([])
+                    node_counts.append(0)
+                    node_means.append(np.nan)
+                    node_stds.append(np.nan)
+
+            # Store histograms and statistics
+            processed_data[f"{key}"] = node_values
+            # processed_data[f"{key}_count"] = np.array(node_counts)
+            # processed_data[f"{key}_mean"] = np.array(node_means)
+            # processed_data[f"{key}_std"] = np.array(node_stds)
+
+        # Save results
+        output_path = os.path.join(output_dir, reference_name)
+        make_path(output_path)
+        np.savez(os.path.join(output_path, "histogram_data.npz"), **processed_data)
+
+        # Update metadata
+        res_MetaData = {
+            #"input_data_checksum": calculate_dict_checksum(processed_data),
+            "histogram_data": os.path.join(output_path, "histogram_data.npz"),
+        }
+        write_JSON(output_path, "histogram_data", res_MetaData)
+
+        logger.info(f"Saved histogram data for reference {reference_name}.")
 
     logger.info("Histogram processing completed.")
+
 
 def do_temporalHistInterpolation(output_dir):
     """

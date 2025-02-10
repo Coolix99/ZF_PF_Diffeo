@@ -1,130 +1,4 @@
 
-def movie_grid_time_evolution_with_data(interpolated_nodes, triangles, data_dict, feature_key, save_path=None, feature_name=None, show_axes=True,scale_unit='',num_levels=20,vlim=None):
-    if feature_name is None:
-        feature_name = feature_key
-
-    # Get unique times sorted
-    times = sorted(list(set([key[0] for key in interpolated_nodes.keys()])))
-
-    # Compute the 10th and 90th percentile limits for the given feature_key across all times and categories
-    feature_values = []
-    for (time, category), data in data_dict.items():
-        if feature_key in data:
-            feature_values.extend(data[feature_key])
-
-    if vlim is None:
-        vmin = np.percentile(feature_values, 10)
-        vmax = np.percentile(feature_values, 90)
-    else:
-        vmin,vmax=vlim
-
-    # Create the figure and axes
-    fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-
-    # Set font sizes for axes labels and titles
-    plt.rcParams.update({'font.size': 14})
-
-    # Set axis labels and titles
-    if show_axes:
-        axs[0].set_title("Development Mesh", fontsize=18)
-        axs[0].set_xlabel("X Coordinates", fontsize=14)
-        axs[0].set_ylabel("Y Coordinates", fontsize=14)
-        axs[1].set_title("Regeneration Mesh", fontsize=18)
-        axs[1].set_xlabel("X Coordinates", fontsize=14)
-        axs[1].set_ylabel("Y Coordinates", fontsize=14)
-
-    # Get the mesh limits for both conditions
-    min_val, max_val = get_mesh_lims(
-        {key: nodes for key, nodes in interpolated_nodes.items() if key[1] == 'Development'},
-        {key: nodes for key, nodes in interpolated_nodes.items() if key[1] == 'Regeneration'}
-    )
-    min_val -= 10
-    max_val += 10
-    axs[0].set_xlim(min_val, max_val)
-    axs[0].set_ylim(min_val, max_val)
-    axs[1].set_xlim(min_val, max_val)
-    axs[1].set_ylim(min_val, max_val)
-
-    # Create a color bar for the data feature with adjusted limits
-    sm = plt.cm.ScalarMappable(cmap='viridis', norm=plt.Normalize(vmin=vmin, vmax=vmax))
-    cbar = plt.colorbar(sm, ax=axs, orientation='vertical', fraction=0.05)
-    cbar.set_label(f'{feature_name}', fontsize=16)
-
-    def add_scale_bar(ax):
-        def round_to_one_significant_digit(value):
-            if value == 0:
-                return 0
-            return round(value, -int(math.floor(math.log10(abs(value)))))
-        """Add a scale bar to the plot if axes are switched off."""
-        # Choose size of the scale bar (adjust this based on your mesh size)
-        bar_size = round_to_one_significant_digit((max_val - min_val) * 0.1) # Adjust bar size based on mesh size
-        fontprops = fm.FontProperties(size=12)
-        scalebar = AnchoredSizeBar(ax.transData,
-                                   bar_size,  # Length of the scale bar
-                                   f'{bar_size:.1f} {scale_unit}',  # Label
-                                   'lower right',  # Position of the scale bar
-                                   pad=0.1,
-                                   color='black',
-                                   frameon=False,
-                                   size_vertical=1,
-                                   fontproperties=fontprops)
-
-        ax.add_artist(scalebar)
-
-    def update(frame):
-        time = times[frame]
-        """Update the plots for each frame of the animation"""
-        # Clear the axes before each update
-        axs[0].clear()
-        axs[1].clear()
-
-        
-        axs[0].set_title(f"t = {time} hpf", fontsize=18)
-        axs[1].set_title(f"t = {time} hpf", fontsize=18)
-
-        # Set axis limits
-        axs[0].set_xlim(min_val, max_val)
-        axs[0].set_ylim(min_val, max_val)
-        axs[1].set_xlim(min_val, max_val)
-        axs[1].set_ylim(min_val, max_val)
-
-        # Get the current node positions and feature data for development and regeneration
-        dev_nodes = interpolated_nodes[(time, 'Development')]
-        reg_nodes = interpolated_nodes[(time, 'Regeneration')]
-        dev_feature_data = data_dict[(time, 'Development')][feature_key]
-        reg_feature_data = data_dict[(time, 'Regeneration')][feature_key]
-
-        # Create triangulations for development and regeneration
-        dev_triang = tri.Triangulation(dev_nodes[:, 0], dev_nodes[:, 1], triangles['Development'])
-        reg_triang = tri.Triangulation(reg_nodes[:, 0], reg_nodes[:, 1], triangles['Regeneration'])
-
-        # Plot the development mesh with filled contours
-        axs[0].tricontourf(dev_triang, dev_feature_data, cmap='viridis', vmin=vmin, vmax=vmax,levels=num_levels)
-        #axs[0].triplot(dev_triang, 'ko-')  # Mesh outline in black
-
-        # Plot the regeneration mesh with filled contours
-        axs[1].tricontourf(reg_triang, reg_feature_data, cmap='viridis', vmin=vmin, vmax=vmax,levels=num_levels)
-        #axs[1].triplot(reg_triang, 'ko-')  # Mesh outline in black
-
-        if not show_axes:
-            axs[0].axis('off')
-            axs[1].axis('off')
-
-            # Add a scale bar
-            add_scale_bar(axs[0])
-            add_scale_bar(axs[1])
-
-        return axs
-
-    # Create the animation
-    anim = FuncAnimation(fig, update, frames=len(times), blit=False, interval=200)
-
-    if save_path:
-        # Save the animation as a video file
-        anim.save(save_path, writer='ffmpeg', fps=8,dpi=200)
-    else:
-        # Display the animation
-        plt.show()
 
 def show_data_movie():
     data_dict=load_data_dict(AvgShape_path)
@@ -341,9 +215,6 @@ def plot_mesh(nodes, triangles, ax, title):
     ax.set_title(title)
     ax.set_aspect('equal')
 
-def show_mesh_series():
-    interpolated_nodes, triangles,_=load_interpolated_data(AvgShape_path)
-    movie_grid_time_evolution(interpolated_nodes, triangles)
 
 
 def plot_grouped_polygons_and_average(df, all_poly, all_coeff, harmonics=2):
@@ -380,3 +251,194 @@ def plot_grouped_polygons_and_average(df, all_poly, all_coeff, harmonics=2):
         ax.legend()
         ax.set_title(f"Group: {group}")
         plt.show()
+
+
+###new
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.tri as tri
+from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+import matplotlib.font_manager as fm
+
+def add_scale_bar(ax, nodes, scale_unit="µm"):
+    """
+    Adds a scale bar to the plot based on the node size.
+    
+    Args:
+        ax: Matplotlib axis.
+        nodes: Numpy array of shape (N, 2) containing mesh nodes.
+        scale_unit (str): Unit for the scale bar.
+    """
+    min_x, max_x = nodes[:, 0].min(), nodes[:, 0].max()
+    bar_size = round(((max_x - min_x) * 0.1)/5, 0)*5  # 10% of mesh width
+    fontprops = fm.FontProperties(size=12)
+    
+    scalebar = AnchoredSizeBar(ax.transData,
+                               bar_size,
+                               f"{bar_size} {scale_unit}",
+                               loc="lower right",
+                               bbox_to_anchor=(-0.05, -0.05),  # Moves it slightly left and down
+                               bbox_transform=ax.transAxes,  # Ensures movement is relative to the axis
+                               pad=0.1,
+                               color="black",
+                               frameon=False,
+                               size_vertical=1,
+                               fontproperties=fontprops)
+    ax.add_artist(scalebar)
+
+def plot_all_reference_meshes(base_dir, scale_unit="µm"):
+    """
+    Plots all reference meshes stored in subfolders of base_dir.
+
+    Args:
+        base_dir (str): Path to the directory containing reference geometry folders.
+        scale_unit (str): Unit for the scale bar.
+    """
+    subfolders = [f for f in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, f))]
+    
+    num_meshes = len(subfolders)
+    cols = min(4, num_meshes)  # Max 4 columns
+    rows = (num_meshes // cols) + (num_meshes % cols > 0)  # Determine row count
+
+    fig, axes = plt.subplots(rows, cols, figsize=(4 * cols, 4 * rows), squeeze=False)
+    axes = axes.flatten()
+
+    for idx, folder in enumerate(subfolders):
+        npz_file = os.path.join(base_dir, folder, f"{folder}_ref.npz")
+        
+        if not os.path.exists(npz_file):
+            print(f"Skipping {folder}, no reference mesh found.")
+            continue
+        
+        # Load mesh data
+        data = np.load(npz_file)
+        nodes, triangles = data["nodes"], data["triangles"]
+
+        # Plot mesh
+        ax = axes[idx]
+        triang = tri.Triangulation(nodes[:, 0], nodes[:, 1], triangles)
+        ax.triplot(triang, color="blue", alpha=0.6)
+        ax.scatter(nodes[:, 0], nodes[:, 1], color="red", s=5)
+        
+        # Title from folder name (category keys)
+        ax.set_title(folder.replace("_", " "), fontsize=12)
+        ax.set_aspect("equal")
+        ax.axis("off")
+
+        # Add scale bar
+        add_scale_bar(ax, nodes, scale_unit)
+
+    # Hide unused subplots if any
+    for i in range(num_meshes, len(axes)):
+        fig.delaxes(axes[i])
+
+    plt.tight_layout()
+    plt.show()
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.tri as tri
+from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+import matplotlib.font_manager as fm
+
+def plot_all_reference_data(base_dir, feature_key, scale_unit="µm",vmin=None,vmax=None):
+    """
+    Plots all reference meshes and overlays selected histogram data with uniform color scaling.
+
+    Args:
+        base_dir (str): Directory containing reference geometries.
+        feature_key (str): Key from histogram data to visualize.
+        scale_unit (str): Unit for the scale bar.
+    """
+    subfolders = [f for f in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, f))]
+
+    num_meshes = len(subfolders)
+    cols = min(4, num_meshes)  # Max 4 columns
+    rows = (num_meshes // cols) + (num_meshes % cols > 0)  # Calculate rows
+
+    fig, axes = plt.subplots(rows, cols, figsize=(7 * cols, 7 * rows), squeeze=False)
+    axes = axes.flatten()
+
+    all_plot_values = []  # Collect all feature values for global scaling
+    hist_data_map = {}  # Cache for histogram data
+
+    # First Pass: Load histogram data once and collect global min/max values
+    for folder in subfolders:
+        npz_hist_file = os.path.join(base_dir, folder, "histogram_data.npz")
+        
+        if os.path.exists(npz_hist_file):
+            hist_data = np.load(npz_hist_file, allow_pickle=True)
+            hist_data_map[folder] = hist_data  # Cache the loaded data
+
+            if feature_key in hist_data:
+                feature_values = hist_data[feature_key]
+                plot_values = np.array([np.median(values) for values in feature_values])
+                all_plot_values.append(plot_values)
+
+    if not all_plot_values:
+        print(f"No valid data found for feature '{feature_key}'.")
+        return
+
+    # Compute global min/max scaling for colorbar
+    all_plot_values = np.concatenate(all_plot_values)
+    if vmin is None:
+        vmin=np.min(all_plot_values)
+        print('vmin',vmin)
+    if vmax is None:
+        vmax =np.max(all_plot_values)
+        print('vmax',vmax)
+
+    # Second Pass: Plot using cached data
+    for idx, folder in enumerate(subfolders):
+        npz_mesh_file = os.path.join(base_dir, folder, f"{folder}_ref.npz")
+
+        if not os.path.exists(npz_mesh_file):
+            print(f"Skipping {folder}, no reference mesh found.")
+            continue
+
+        # Load mesh data
+        mesh_data = np.load(npz_mesh_file)
+        nodes, triangles = mesh_data["nodes"], mesh_data["triangles"]
+
+        # Retrieve cached histogram data
+        hist_data = hist_data_map.get(folder, None)
+        plot_values = None
+        if hist_data and feature_key in hist_data:
+            feature_values = hist_data[feature_key]
+            plot_values = np.array([np.median(values) for values in feature_values])
+
+        # Plot reference mesh
+        ax = axes[idx]
+        triang = tri.Triangulation(nodes[:, 0], nodes[:, 1], triangles)
+        if plot_values is not None:
+            ax.tricontourf(triang, plot_values, cmap="viridis", levels=100, vmin=vmin, vmax=vmax)
+        else:
+            ax.triplot(triang, color="blue", alpha=0.6)
+
+        # Title from folder name (category keys)
+        ax.set_title(folder.replace("_", " "), fontsize=12)
+        ax.set_aspect("equal")
+        ax.axis("off")
+
+        # Add scale bar
+        add_scale_bar(ax, nodes, scale_unit)
+
+    # Create a single colorbar below all plots
+    cbar_ax = fig.add_axes([0.15, 0.04, 0.7, 0.02])  # Position the color bar
+    sm = plt.cm.ScalarMappable(cmap="viridis", norm=plt.Normalize(vmin=vmin, vmax=vmax))
+    cbar = plt.colorbar(sm, cax=cbar_ax, orientation="horizontal")
+    cbar.set_label(feature_key, fontsize=14)
+
+    # Hide unused subplots if any
+    for i in range(num_meshes, len(axes)):
+        fig.delaxes(axes[i])
+
+    plt.tight_layout()
+    plt.subplots_adjust(hspace=0.2)  
+    plt.subplots_adjust(wspace=0.2) 
+    plt.subplots_adjust(bottom=0.1) 
+    plt.subplots_adjust(top=0.97) 
+    plt.show()
