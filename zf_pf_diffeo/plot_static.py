@@ -344,13 +344,13 @@ import matplotlib.tri as tri
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 import matplotlib.font_manager as fm
 
-def plot_all_reference_data(base_dir, feature_key, scale_unit="µm",vmin=None,vmax=None):
+def plot_all_reference_data(base_dir, data_to_value_function, scale_unit="µm",vmin=None,vmax=None):
     """
     Plots all reference meshes and overlays selected histogram data with uniform color scaling.
 
     Args:
         base_dir (str): Directory containing reference geometries.
-        feature_key (str): Key from histogram data to visualize.
+        data_to_value_function
         scale_unit (str): Unit for the scale bar.
     """
     subfolders = [f for f in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, f))]
@@ -373,13 +373,10 @@ def plot_all_reference_data(base_dir, feature_key, scale_unit="µm",vmin=None,vm
             hist_data = np.load(npz_hist_file, allow_pickle=True)
             hist_data_map[folder] = hist_data  # Cache the loaded data
 
-            if feature_key in hist_data:
-                feature_values = hist_data[feature_key]
-                plot_values = np.array([np.median(values) for values in feature_values])
-                all_plot_values.append(plot_values)
+            all_plot_values.append(data_to_value_function(hist_data))
 
     if not all_plot_values:
-        print(f"No valid data found for feature '{feature_key}'.")
+        print(f"No valid data found.")
         return
 
     # Compute global min/max scaling for colorbar
@@ -406,9 +403,8 @@ def plot_all_reference_data(base_dir, feature_key, scale_unit="µm",vmin=None,vm
         # Retrieve cached histogram data
         hist_data = hist_data_map.get(folder, None)
         plot_values = None
-        if hist_data and feature_key in hist_data:
-            feature_values = hist_data[feature_key]
-            plot_values = np.array([np.median(values) for values in feature_values])
+        if hist_data :
+            plot_values = data_to_value_function(hist_data)
 
         # Plot reference mesh
         ax = axes[idx]
@@ -430,13 +426,13 @@ def plot_all_reference_data(base_dir, feature_key, scale_unit="µm",vmin=None,vm
     cbar_ax = fig.add_axes([0.15, 0.04, 0.7, 0.02])  # Position the color bar
     sm = plt.cm.ScalarMappable(cmap="viridis", norm=plt.Normalize(vmin=vmin, vmax=vmax))
     cbar = plt.colorbar(sm, cax=cbar_ax, orientation="horizontal")
-    cbar.set_label(feature_key, fontsize=14)
+    cbar.set_label('feature_key', fontsize=14)
 
     # Hide unused subplots if any
     for i in range(num_meshes, len(axes)):
         fig.delaxes(axes[i])
 
-    plt.tight_layout()
+    #plt.tight_layout()
     plt.subplots_adjust(hspace=0.2)  
     plt.subplots_adjust(wspace=0.2) 
     plt.subplots_adjust(bottom=0.1) 
