@@ -9,8 +9,8 @@ setup(
     license="MIT",
     packages=find_packages(),
     install_requires=[
-        # Add dependencies here
-        # e.g., 'numpy', 'scipy'
+       "spatial_efd",
+       "gmsh"
     ],
     python_requires='>=3.9',
 )

@@ -19,24 +19,24 @@ def setup_folders(base_dirs, data_name):
     make_path(paths["output"])
     return paths
 
-def group_by_keys(surface_folders, surface_dir, category_keys):
+def group_by_keys(surface_folders, surface_dir, category_keys,surface_key):
     """Group datasets based on metadata keys."""
     groups = defaultdict(list)
     metadata_map = {}
     
     for data_name in surface_folders:
         metadata = get_JSON(os.path.join(surface_dir, data_name))
-        if metadata and "Thickness_MetaData" in metadata:
-            key_tuple = tuple(metadata["Thickness_MetaData"].get(k, None) for k in category_keys)
+        if metadata and surface_key in metadata:
+            key_tuple = tuple(metadata[surface_key].get(k, None) for k in category_keys)
             groups[key_tuple].append(data_name)
             metadata_map[data_name] = metadata
     
     return groups, metadata_map
 
-def should_process_group(group, metadata_map, output_dir, output_key):
+def should_process_group(group, metadata_map, output_dir, output_key,surface_key, surface_file_key):
     """Determine if a group needs reprocessing based on contained datasets and input files."""
-    input_data = {name: metadata_map[name]["Thickness_MetaData"] for name in group}
-    input_files = {name: metadata_map[name]["Thickness_MetaData"]["Surface file"] for name in group}
+    input_data = {name: metadata_map[name][surface_key] for name in group}
+    input_files = {name: metadata_map[name][surface_key][surface_file_key] for name in group}
     input_data_checksum = calculate_dict_checksum(input_data)
     output_data = get_JSON(output_dir)
 
@@ -68,7 +68,7 @@ def save_2d_mesh(nodes, triangles, boundary_indices, file_path):
     np.savez(file_path, nodes=nodes, triangles=triangles, boundary_indices=boundary_indices)
     logger.info(f"Saved 2D mesh to {file_path}")
 
-def do_referenceGeometries(surface_dir, category_keys, output_dir):
+def do_referenceGeometries(surface_dir, category_keys, output_dir,surface_key="Thickness_MetaData",surface_file_key="Surface file"):
     """
     Computes representative surfaces for given category groups.
     
@@ -84,13 +84,13 @@ def do_referenceGeometries(surface_dir, category_keys, output_dir):
         item for item in os.listdir(surface_dir) if os.path.isdir(os.path.join(surface_dir, item))
     ]
     
-    groups, metadata_map = group_by_keys(surface_folders, surface_dir, category_keys)
-    
+    groups, metadata_map = group_by_keys(surface_folders, surface_dir, category_keys,surface_key)
+    logger.debug(f"groups: {groups}")
     for key_tuple, group in tqdm(groups.items(), desc="Processing reference geometries", unit="group"):
         representative_name = "_".join(map(str, key_tuple))
         paths = setup_folders(base_dirs, representative_name)
         
-        res = should_process_group(group, metadata_map, paths["output"], "reference_geometry")
+        res = should_process_group(group, metadata_map, paths["output"], "reference_geometry",surface_key=surface_key,surface_file_key=surface_file_key)
         if not res:
             logger.info(f"Skipping group {key_tuple}: No processing needed.")
             continue
@@ -237,7 +237,7 @@ def do_temporalreferenceGeometries(surfaces2d_dir, time_key, category_keys, outp
     
     logger.info("Temporal reference geometry processing completed.")
 
-def get_reference_geometry(reference_dir, category_keys, metadata):
+def get_reference_geometry(reference_dir, category_keys, metadata,surface_key):
     """
     Finds the correct reference geometry file based on metadata.
 
@@ -249,7 +249,7 @@ def get_reference_geometry(reference_dir, category_keys, metadata):
     Returns:
         tuple: (reference nodes, reference triangles, boundary indices) if found, else (None, None, None).
     """
-    key_tuple = tuple(metadata["Thickness_MetaData"].get(k, "MISSING") for k in category_keys)
+    key_tuple = tuple(metadata[surface_key].get(k, "MISSING") for k in category_keys)
     reference_name = "_".join(map(str, key_tuple))
     ref_file = os.path.join(reference_dir, reference_name, f"{reference_name}_ref.npz")
 
@@ -261,7 +261,7 @@ def get_reference_geometry(reference_dir, category_keys, metadata):
     return ref_data["nodes"], ref_data["triangles"], ref_data["boundary_indices"],reference_name
 
 
-def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir):
+def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir,surface_key,surface_file_key):
     """
     Projects 3D point data onto deformed 2D reference surfaces.
 
@@ -283,15 +283,15 @@ def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir):
         surface_path = os.path.join(surface_dir, data_name)
         metadata = get_JSON(surface_path)
 
-        if not metadata or "Thickness_MetaData" not in metadata:
+        if not metadata or surface_key not in metadata:
             logger.warning(f"Skipping {data_name}: Missing metadata")
             continue
 
-        ref_nodes, ref_triangles, ref_boundaries, reference_name = get_reference_geometry(reference_dir, category_keys, metadata)
+        ref_nodes, ref_triangles, ref_boundaries, reference_name = get_reference_geometry(reference_dir, category_keys, metadata,surface_key=surface_key)
         if ref_nodes is None:
             continue
 
-        mesh_3d = pv.read(os.path.join(surface_path, metadata["Thickness_MetaData"]["Surface file"]))
+        mesh_3d = pv.read(os.path.join(surface_path, metadata[surface_key][surface_file_key]))
 
         # Get indices mapping 3D points to reference nodes
         indices = transfer_data_to_reference(ref_nodes, ref_triangles, ref_boundaries, mesh_3d)
@@ -383,7 +383,7 @@ def do_temporalHistInterpolation(output_dir):
 
     logger.info("Temporal histogram interpolation completed.")
 
-def do_all(surface_dir, surfaces2d_dir, category_keys, output_dir):
+def do_all(surface_dir, surfaces2d_dir, category_keys, output_dir,surface_file_key):
     """
     Runs the entire pipeline in sequence.
     
@@ -395,7 +395,7 @@ def do_all(surface_dir, surfaces2d_dir, category_keys, output_dir):
     """
     do_referenceGeometries(surface_dir, category_keys, output_dir)
     do_temporalreferenceGeometries(surfaces2d_dir, "time", category_keys, output_dir)
-    do_HistPointData(surface_dir, surfaces2d_dir, category_keys, output_dir)
+    do_HistPointData(surface_dir, surfaces2d_dir, category_keys, output_dir,surface_file_key)
     do_temporalHistInterpolation(output_dir)
 
     logger.info("Full pipeline processing completed.")
