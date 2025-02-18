@@ -241,7 +241,7 @@ def filter_outliers(data, n_std=3):
     filtered = np.where(np.abs(data - mean) > n_std * std, np.nan, data)
     return filtered
 
-def transfer_data(nodes, triangle,boundary, mesh:pv.PolyData):
+def transfer_data(nodes, triangle,boundary, mesh:pv.PolyData,n_harmonics,n_coords):
     #print(mesh.point_data)
     polygon = getPolygon(mesh)
     centroid = centroid_Polygon(polygon[0, :], polygon[1, :])
@@ -390,6 +390,10 @@ def load_data_dict(save_path, file_name="data_dict.pkl"):
 
 
 def create_data_series():
+    load_interpolated_data=None
+    AvgShape_path=None
+    getData=None
+    
     interpolated_nodes, triangles,boundaries=load_interpolated_data(AvgShape_path)
     times, categories, meshs=getData()
     
