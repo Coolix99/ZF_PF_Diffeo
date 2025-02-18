@@ -355,7 +355,7 @@ def movie_temporal_evolution(interpolated_nodes, triangles, save_path=None, scal
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.set_xlim(min_x - 10, max_x + 10)
     ax.set_ylim(min_y - 10, max_y + 10)
-    ax.set_title("Temporal Evolution of Reference Geometries", fontsize=14)
+    ax.set_title(f"Time: {times[0]} hpf", fontsize=14)
 
     # Initialize plot
     nodes=interpolated_nodes[times[0]]
@@ -367,18 +367,17 @@ def movie_temporal_evolution(interpolated_nodes, triangles, save_path=None, scal
     def update(frame):
         """Update function for animation."""
         time = times[frame]
-        nodes = interpolated_nodes[time]  # Use int key directly
-
-        # Update triangulation
-        triang.set_mask(np.zeros(triangles.shape[0], dtype=bool))  # Reset mask
-        triang.x = nodes[:, 0]
-        triang.y = nodes[:, 1]
         
-        # Update mesh plot
-        mesh_plot.set_data(triang.x, triang.y)
+        nodes = interpolated_nodes[time]
+        triang = tri.Triangulation(nodes[:, 0], nodes[:, 1], triangles)
+        ax.clear()
+        ax.set_xlim(min_x - 10, max_x + 10)
+        ax.set_ylim(min_y - 10, max_y + 10)
+        ax.triplot(triang, color="blue", alpha=0.6)
 
         ax.set_title(f"Time: {time} hpf", fontsize=14)
         return mesh_plot,
+
 
     anim = animation.FuncAnimation(fig, update, frames=len(times), blit=False, interval=200)
 
