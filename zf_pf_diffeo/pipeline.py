@@ -346,6 +346,8 @@ def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir,surfa
         # Save results
         output_path = os.path.join(output_dir, reference_name)
         make_path(output_path)
+        for key in processed_data:
+            processed_data[key] = np.array(processed_data[key], dtype=object)
         np.savez(os.path.join(output_path, "histogram_data.npz"), **processed_data)
 
         # Update metadata
