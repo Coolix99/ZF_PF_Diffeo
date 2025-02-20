@@ -696,7 +696,7 @@ def propagate_mesh_backward(last_mesh, interpolated_coeffs):
     Returns:
         dict: Interpolated node positions for each time step.
     """
-    nodes, triangles = last_mesh
+    nodes, triangles,boundary_indices = last_mesh
     times=np.array(list(interpolated_coeffs.keys()))
     interpolated_nodes = {times[-1]: nodes.copy()}
     
@@ -707,7 +707,6 @@ def propagate_mesh_backward(last_mesh, interpolated_coeffs):
         xt, yt = spatial_efd.inverse_transform(interpolated_coeffs[current_time], harmonic=10, n_coords=40)
         target_polygon = np.stack((xt, yt)).T
         
-        boundary_indices = get_boundary_indices(nodes, target_polygon)
         boundary_displacement = target_polygon - nodes[boundary_indices]
         
         # Solve Laplacian equation to propagate deformation
@@ -726,8 +725,11 @@ def create_TempRefGeometry(ref_coeffs,times):
     last_time = max(times)
     last_coeff = interpolated_coeffs[last_time]
     xt, yt = spatial_efd.inverse_transform(last_coeff, harmonic=10, n_coords=40)
-    last_mesh = generate_2d_mesh(np.stack((xt, yt)).T, mesh_size=100)
+    nodes, triangles = generate_2d_mesh(np.stack((xt, yt)).T, mesh_size=100)
+    avgPolygon = np.stack((xt, yt))
+    boundary_indices = get_boundary_indices(nodes, avgPolygon.T)  # Extract boundary indices
 
+    last_mesh = nodes, triangles,boundary_indices
     # Propagate backward through time (moved to reference_geometries.py)
     interpolated_nodes = propagate_mesh_backward(last_mesh, interpolated_coeffs)
     return interpolated_nodes,last_mesh

@@ -4,6 +4,8 @@ import pyvista as pv
 import logging
 from tqdm import tqdm
 from collections import defaultdict
+from scipy.interpolate import interp1d
+import os
 
 from zf_pf_geometry.utils import make_path
 from zf_pf_geometry.metadata_manager import should_process, write_JSON, get_JSON, calculate_dict_checksum
@@ -146,8 +148,8 @@ def save_interpolated_data(interpolated_nodes, last_mesh, output_path, last_mesh
     np.savez(nodes_file, **interpolated_nodes_str_keys)
 
     # Save last mesh separately (nodes & triangles)
-    nodes, triangles = last_mesh
-    np.savez(last_mesh_file, nodes=nodes, triangles=triangles)
+    nodes, triangles,boundary_indices = last_mesh
+    np.savez(last_mesh_file, nodes=nodes, triangles=triangles, boundary_indices=boundary_indices)
 
     logger.info(f"Saved interpolated nodes to {nodes_file}")
     logger.info(f"Saved last mesh to {last_mesh_file}")
@@ -259,7 +261,6 @@ def get_reference_geometry(reference_dir, category_keys, metadata,surface_key):
     ref_data = np.load(ref_file)
     return ref_data["nodes"], ref_data["triangles"], ref_data["boundary_indices"],reference_name
 
-
 def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir,surface_key,surface_file_key):
     """
     Projects 3D point data onto deformed 2D reference surfaces.
@@ -317,30 +318,18 @@ def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir,surfa
 
         for key, node_dict in ref_data["data"].items():
             node_values = []
-            node_counts = []
-            node_means = []
-            node_stds = []
 
             for node_idx in range(len(ref_nodes)):  # Ensure ordering
                 values = node_dict.get(node_idx, [])
 
                 if values:
                     values = np.array(values)
-                    node_values.append(values)
-                    node_counts.append(len(values))
-                    node_means.append(np.mean(values))
-                    node_stds.append(np.std(values))
                 else:
                     node_values.append([])
-                    node_counts.append(0)
-                    node_means.append(np.nan)
-                    node_stds.append(np.nan)
+
 
             # Store histograms and statistics
             processed_data[f"{key}"] = node_values
-            # processed_data[f"{key}_count"] = np.array(node_counts)
-            # processed_data[f"{key}_mean"] = np.array(node_means)
-            # processed_data[f"{key}_std"] = np.array(node_stds)
 
         # Save results
         output_path = os.path.join(output_dir, reference_name)
@@ -362,27 +351,171 @@ def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir,surfa
 
 
 
-def do_temporalHistInterpolation(output_dir):
+def get_temp_reference_geometry(temp_maps_dir, temp_key,category_keys, metadata,surface_key):
     """
-    Interpolates histograms over time.
-    
+    Finds the correct reference geometry file based on metadata.
+
     Args:
-        output_dir (str): Directory containing histogram data.
+        temp_maps_dir (str): Path where temp reference geometries are stored.
+        temp_key  (str): Key defining time steps.
+        category_keys (list): Keys used for grouping.
+        metadata (dict): Metadata from the current 3D surface.
+
+    Returns:
+        tuple: (reference nodes, reference triangles, boundary indices) if found, else (None, None, None).
+    """
+    key_tuple = tuple(metadata[surface_key].get(k, "MISSING") for k in category_keys)
+    reference_name = "_".join(map(str, key_tuple))
+    interpolated_nodes_file = os.path.join(temp_maps_dir, reference_name, f"interpolated_nodes.npz")
+    last_mesh_file = os.path.join(temp_maps_dir, reference_name, f"last_mesh.npz")
+
+    if not os.path.exists(interpolated_nodes_file) or not os.path.exists(last_mesh_file):
+        logger.warning(f"Reference geometry not found for {reference_name}")
+        return
+
+    interpolated_nodes = np.load(interpolated_nodes_file)
+    time=metadata[surface_key][temp_key]
+    nodes_t = interpolated_nodes[str(time)]
+    last_mesh = np.load(last_mesh_file)
+    return nodes_t, last_mesh["triangles"], last_mesh["boundary_indices"],reference_name,time
+
+
+def do_temporalHistInterpolation(surface_dir, temp_maps_dir, temp_key, category_keys, value_functions, surface_key="Thickness_MetaData", surface_file_key="Surface file"):
+    """
+    Transfers 3D point data onto time-dependent reference geometries and interpolates missing data.
+
+    Args:
+        surface_dir (str): Directory containing 3D surfaces.
+        temp_maps_dir (str): Directory containing computed 2D reference geometries.
+        temp_key (str): Key representing time in metadata.
+        category_keys (list): Keys used for grouping data.
+        value_functions (dict): Mapping of feature keys to functions that extract scalar values from histogram data.
+        surface_key (str, optional): Key for surface metadata.
+        surface_file_key (str, optional): Key for surface file in metadata.
     """
     logger.info("Processing temporal histogram interpolation.")
 
-    hist_folders = [
-        item for item in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, item))
+    surface_folders = [
+        item for item in os.listdir(surface_dir) if os.path.isdir(os.path.join(surface_dir, item))
     ]
 
-    for data_name in tqdm(hist_folders, desc="Interpolating histograms", unit="dataset"):
-        hist_path = os.path.join(output_dir, data_name)
+    hist_map = {}
 
-        # TODO: Implement temporal interpolation for histograms
+    # Collect data for all reference names and times
+    for data_name in tqdm(surface_folders, desc="Processing histograms", unit="dataset"):
+        surface_path = os.path.join(surface_dir, data_name)
+        metadata = get_JSON(surface_path)
+        if not metadata or surface_key not in metadata:
+            logger.warning(f"Skipping {data_name}: Missing metadata")
+            continue
 
-        logger.info(f"Interpolated histograms for {data_name}")
+        mesh_3d = pv.read(os.path.join(surface_path, metadata[surface_key][surface_file_key]))
 
-    logger.info("Temporal histogram interpolation completed.")
+        ref_nodes, ref_triangles, ref_boundaries, reference_name, time = get_temp_reference_geometry(
+            temp_maps_dir, temp_key, category_keys, metadata, surface_key=surface_key
+        )
+
+        # Get indices mapping 3D points to reference nodes
+        indices = transfer_data_to_reference(ref_nodes, ref_triangles, ref_boundaries, mesh_3d)
+
+        if reference_name not in hist_map:
+            hist_map[reference_name] = {
+                "ref_nodes": ref_nodes, 
+                "data": defaultdict(lambda: defaultdict(list)),  # {time: {feature: {node_idx: [values]}}}
+                "times": set()
+            }
+
+        hist_map[reference_name]["times"].add(time)
+
+        # Ensure `hist_map[reference_name]["data"][time][key]` is initialized with an empty list for each node
+        for key in mesh_3d.point_data.keys():
+            if key not in hist_map[reference_name]["data"][time]:
+                hist_map[reference_name]["data"][time][key] = [[] for _ in range(len(ref_nodes))]  # Initialize empty lists for each node
+
+        # Iterate through all point data keys
+        for key in mesh_3d.point_data.keys():
+            values = np.array(mesh_3d.point_data[key])
+
+            # Assign values to corresponding reference nodes
+            for i, node_idx in enumerate(indices):
+                if 0 <= node_idx < len(ref_nodes):  # Ensure node_idx is in bounds
+                    hist_map[reference_name]["data"][time][key][node_idx].append(values[i])
+                    
+                else:
+                    logger.warning(f"Skipping out-of-bounds node_idx {node_idx} for reference {reference_name}, time {time}")
+                    raise
+
+
+    for reference_name, ref_data in hist_map.items():
+        ref_nodes = ref_data["ref_nodes"]
+        collected_times = sorted(ref_data["times"])
+
+        print(reference_name)
+        print(hist_map[reference_name]["data"].keys())
+        print(hist_map[reference_name]["data"][60].keys())
+
+        # Ensure all intermediate times exist
+        min_time, max_time = min(collected_times), max(collected_times)
+        full_time_range = list(range(min_time, max_time + 1))  # Fill gaps in time
+
+        processed_data = {}
+
+        # Step 1: Process raw histogram data (before applying value functions)
+        structured_histograms = {}  # Store per time
+
+        for time in collected_times:
+            structured_histograms[time] = {}  # Initialize for this time
+
+            for feature_key in ref_data["data"][time]:
+                hist_data = ref_data["data"][time][feature_key]  # Raw histogram data at this time
+                structured_data = []
+
+                for node_idx in range(len(ref_nodes)):  # Ensure ordering
+                    values = hist_data[node_idx] 
+
+                    if values:
+                        structured_data.append(np.array(values))
+                    else:
+                        structured_data.append(np.nan)  # Empty nodes get NaN
+
+                structured_histograms[time][feature_key] = np.array(structured_data, dtype=object)
+               
+        # Step 2: Apply all value functions
+        for feature_key, func in value_functions.items():
+            extracted_values = {}
+
+            for time in collected_times:
+                print(time)
+
+                if time in structured_histograms:
+                    extracted_values[time] = func(structured_histograms[time])
+                    #print(extracted_values[time])
+                    print(extracted_values[time].shape)
+
+            # Convert to sorted numpy arrays for interpolation
+            times_with_data = np.array(sorted(extracted_values.keys()))
+            values_with_data = np.array([extracted_values[t] for t in times_with_data])
+
+            # Interpolate missing values
+            interpolator = interp1d(times_with_data, values_with_data, axis=0, kind="linear", fill_value="extrapolate")
+            interpolated_values = {str(t): interpolator(t) for t in full_time_range}
+
+            # Store processed data
+            processed_data[feature_key] = interpolated_values
+
+        # Save results
+        output_path = os.path.join(temp_maps_dir, reference_name)
+        make_path(output_path)
+        np.savez(os.path.join(output_path, "interpolated_histograms.npz"), **processed_data)
+
+        # Update metadata
+        res_MetaData = {
+            "interpolated_histograms": os.path.join(output_path, "interpolated_histograms.npz"),
+        }
+        write_JSON(output_path, "interpolated_histograms", res_MetaData)
+
+        logger.info(f"Saved interpolated histograms for reference {reference_name}.")
+
 
 def do_all(surface_dir, surfaces2d_dir, category_keys, output_dir,surface_file_key):
     """
