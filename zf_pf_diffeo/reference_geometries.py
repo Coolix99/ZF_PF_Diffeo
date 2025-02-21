@@ -1,8 +1,7 @@
 import os
-import pandas as pd
 import pyvista as pv
 import numpy as np
-import spatial_efd
+#import spatial_efd
 import gmsh
 import scipy.sparse as sp
 from scipy.sparse.linalg import spsolve
@@ -10,230 +9,13 @@ from scipy.spatial import cKDTree
 import pickle 
 from typing import List
 from scipy.interpolate import interp1d
-
+import logging
+from spatial_efd import AverageCoefficients, inverse_transform
 
 from zf_pf_diffeo.boundary import getBoundary
 
 
-# def get_last_time_meshes(avgPolygons, mesh_size=0.1):
-#     # Find the maximum time for each condition
-#     last_dev_time = max([time for (time, condition) in avgPolygons if condition == 'Development'])
-#     last_reg_time = max([time for (time, condition) in avgPolygons if condition == 'Regeneration'])
-    
-#     # Extract the corresponding polygons
-#     dev_polygon = avgPolygons[(last_dev_time, 'Development')]
-#     reg_polygon = avgPolygons[(last_reg_time, 'Regeneration')]
-    
-#     # Generate meshes for both polygons
-#     dev_nodes, dev_triangles = generate_2d_mesh(dev_polygon.T, mesh_size)
-#     reg_nodes, reg_triangles = generate_2d_mesh(reg_polygon.T, mesh_size)
-    
-#     # Find the indices of the original boundary points in the new nodes array
-#     dev_boundary_indices = get_boundary_indices(dev_nodes, dev_polygon.T)
-#     reg_boundary_indices = get_boundary_indices(reg_nodes, reg_polygon.T)
-    
-#     # Return meshes and boundary indices
-#     return (dev_nodes, dev_triangles, dev_boundary_indices), (reg_nodes, reg_triangles, reg_boundary_indices)
-
-
-# def interpolate_mesh_over_time(avgPolygons, last_time_meshes):
-#     # Initialize the interpolated nodes dictionary for both conditions
-#     interpolated_nodes = {}
-
-#     # Define the conditions
-#     conditions = ['Development', 'Regeneration']
-
-#     # Loop over each condition (Development and Regeneration)
-#     for condition in conditions:
-#         # Extract the corresponding nodes, triangles, and boundary indices
-#         nodes, triangles, boundary_indices = last_time_meshes[condition]
-
-#         # Get the time steps for the current condition
-#         times = sorted([time for (time, cond) in avgPolygons if cond == condition])
-
-#         # Initialize the interpolation with the last time step
-#         interpolated_nodes[(times[-1], condition)] = nodes.copy()
-
-#         # Step backward from the last time to the first, computing displacement at each step
-#         for t_idx in range(len(times) - 2, -1, -1):
-#             current_time = times[t_idx]
-
-#             # Get the corresponding polygon for the current time step
-#             polygon = avgPolygons[(current_time, condition)].T
-
-#             # Compute the displacement for the boundary nodes
-#             boundary_displacement = polygon - nodes[boundary_indices]
-
-#             # Solve Laplace equation to propagate the displacement to the interior nodes
-#             displacement = solve_laplace(nodes, triangles, boundary_indices, boundary_displacement)
-
-#             # Apply the displacement to the nodes
-#             nodes += displacement
-
-#             # Store the interpolated node positions
-#             interpolated_nodes[(current_time, condition)] = nodes.copy()
-
-#     return interpolated_nodes
-
-
-# def get_mesh_lims(interpolated_dev_nodes, interpolated_reg_nodes):
-#     min_val, max_val = float('inf'), float('-inf')  # Initialize with extreme values
-    
-#     # Iterate through all time steps for development nodes
-#     for nodes in interpolated_dev_nodes.values():
-#         x_values = nodes[:, 0]  # Extract x-coordinates
-#         y_values = nodes[:, 1]  # Extract y-coordinates
-        
-#         # Find the min and max of both x and y
-#         min_val = min(min_val, np.min(x_values), np.min(y_values))
-#         max_val = max(max_val, np.max(x_values), np.max(y_values))
-    
-#     # Iterate through all time steps for regeneration nodes
-#     for nodes in interpolated_reg_nodes.values():
-#         x_values = nodes[:, 0]  # Extract x-coordinates
-#         y_values = nodes[:, 1]  # Extract y-coordinates
-        
-#         # Find the min and max of both x and y
-#         min_val = min(min_val, np.min(x_values), np.min(y_values))
-#         max_val = max(max_val, np.max(x_values), np.max(y_values))
-    
-#     return min_val, max_val
-
-
-
-# def save_interpolated_data(interpolated_nodes, triangles,boundaries, AvgShape_path):
-#     # Ensure the directory exists
-#     if not os.path.exists(AvgShape_path):
-#         os.makedirs(AvgShape_path)
-    
-#     # Define file paths
-#     nodes_file = os.path.join(AvgShape_path, "interpolated_nodes.pkl")
-#     triangles_file = os.path.join(AvgShape_path, "triangles.pkl")
-#     boundaries_file = os.path.join(AvgShape_path, "boundaries.pkl")
-
-#     # Save interpolated_nodes
-#     with open(nodes_file, 'wb') as f:
-#         pickle.dump(interpolated_nodes, f)
-    
-#     # Save triangles
-#     with open(triangles_file, 'wb') as f:
-#         pickle.dump(triangles, f)
-
-#     # Save triangles
-#     with open(boundaries_file, 'wb') as f:
-#         pickle.dump(boundaries, f)
-
-#     print(f"Data saved successfully to {AvgShape_path}")
-
-# def load_interpolated_data(AvgShape_path):
-#     # Define file paths
-#     nodes_file = os.path.join(AvgShape_path, "interpolated_nodes.pkl")
-#     triangles_file = os.path.join(AvgShape_path, "triangles.pkl")
-#     boundaries_file = os.path.join(AvgShape_path, "boundaries.pkl")
-
-#     # Load interpolated_nodes
-#     with open(nodes_file, 'rb') as f:
-#         interpolated_nodes = pickle.load(f)
-    
-#     # Load triangles
-#     with open(triangles_file, 'rb') as f:
-#         triangles = pickle.load(f)
-
-#     # Load triangles
-#     with open(boundaries_file, 'rb') as f:
-#         boundaries = pickle.load(f)
-
-
-#     print(f"Data loaded successfully from {AvgShape_path}")
-    
-#     return interpolated_nodes, triangles,boundaries
-
-# def create_mesh_series():
-#     FlatFin_folder_list = os.listdir(FlatFin_path)
-#     FlatFin_folder_list = [item for item in FlatFin_folder_list if os.path.isdir(os.path.join(FlatFin_path, item))]
-    
-#     data_list = []
-#     all_coeff = {}
-#     all_poly = {}
-    
-#     for FlatFin_folder in FlatFin_folder_list:
-#         FlatFin_dir_path = os.path.join(FlatFin_path, FlatFin_folder)
-#         MetaData = get_JSON(FlatFin_dir_path)
-        
-#         if 'Thickness_MetaData' not in MetaData:
-#             continue
-        
-#         MetaData = MetaData['Thickness_MetaData']
-        
-#         data_list.append({
-#             'folder_name': FlatFin_folder,
-#             'file_name': MetaData['Surface file'],
-#             'condition': MetaData['condition'],
-#             'time in hpf': MetaData['time in hpf'],
-#             'genotype': MetaData['genotype'],
-#             'experimentalist': MetaData['experimentalist']
-#         })
-        
-#         surface_file_name = MetaData['Surface file']
-#         mesh_3d = pv.read(os.path.join(FlatFin_dir_path, surface_file_name))
-#         polygon = getPolygon(mesh_3d)
-#         coeff = getCoeff(polygon, n_harmonics)
-
-
-#         # x, y = polygon[0, :], polygon[1, :]
-#         # centroid = centroid_Polygon(x, y)
-#         # x_centered = x - centroid[0]
-#         # y_centered = y - centroid[1]
-#         #plt.plot(x_centered, y_centered, 'g', alpha=0.3, label='Individual Polygons')
-#         #xt, yt = spatial_efd.inverse_transform(coeff, harmonic=n_harmonics)
-#         #plt.plot(xt, yt, 'b', label='smooth Polygon')
-#         #print(coeff)
-#         x0=np.sum(coeff[:,2])
-#         y0=np.sum(coeff[:,0])
-#         #print(np.sum(coeff,axis=0))
-#         #plt.scatter((x0,x0), (y0,y0), label='start')
-#         theta=np.arctan2(y0, x0)
-#         coeff_shift=shift_coeff(coeff,-theta)
-#         #xt, yt = spatial_efd.inverse_transform(coeff_shift, harmonic=n_harmonics)
-#         #plt.plot(xt, yt, 'g', label='shift Polygon')
-#         # x0=np.sum(coeff_shift[:,2])
-#         # y0=np.sum(coeff_shift[:,0])
-#         #print(np.sum(coeff_shift,axis=0))
-#         #plt.scatter((x0,x0), (y0,y0), label='start')
-       
-#         #plt.show()
-        
-
-#         all_coeff[FlatFin_folder] = coeff_shift
-#         all_poly[FlatFin_folder] = polygon
-
-#     # Store the metadata in a pandas DataFrame
-#     df = pd.DataFrame(data_list)
-    
-#     # Plot grouped polygons and the averaged Fourier descriptors
-#     #plot_grouped_polygons_and_average(df, all_poly, all_coeff,harmonics=n_harmonics)
-#     avgCoeffs,avgPolygons=get_avg_Shapes(df,all_coeff,n_harmonics)
-#     #plot_time_evolution(avgPolygons)
-#     interpolatePolygons(avgPolygons)
-#     #plot_time_evolution(avgPolygons)
-#     #movie_time_evolution(avgPolygons)
-
-#     (dev_nodes, dev_triangles, dev_boundary_indices), (reg_nodes, reg_triangles, reg_boundary_indices) = get_last_time_meshes(avgPolygons, mesh_size=1000.0)
-#     last_time_meshes = {
-#         'Development': (dev_nodes, dev_triangles, dev_boundary_indices),
-#         'Regeneration': (reg_nodes, reg_triangles, reg_boundary_indices)
-#     }
-#     triangles = {
-#         'Development': dev_triangles,
-#         'Regeneration': reg_triangles
-#     }
-#     boundaries = {
-#         'Development': dev_boundary_indices,
-#         'Regeneration': reg_boundary_indices
-#     }
-#     interpolated_nodes=interpolate_mesh_over_time(avgPolygons, last_time_meshes)
-#     #save_interpolated_data(interpolated_nodes, triangles,boundaries, AvgShape_path)
-    
+logger = logging.getLogger(__name__)
 
 def filter_outliers(data, n_std=3):
     mean = np.mean(data)
@@ -427,14 +209,9 @@ def create_data_series():
 ##########new
 
 
-import logging
-import numpy as np
-import pyvista as pv
-import gmsh
-from typing import List
-from spatial_efd import AverageCoefficients, inverse_transform
 
-logger = logging.getLogger(__name__)
+
+
 
 def get_boundary_indices(nodes, boundary_points):
     """
