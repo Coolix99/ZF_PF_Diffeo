@@ -164,7 +164,12 @@ def plot_all_reference_data(base_dir, data_to_value_function, scale_unit="µm", 
         add_scale_bar(ax, nodes, scale_unit)
 
         if separate_windows:
+            cbar_ax = fig.add_axes([0.15, 0.04, 0.7, 0.02])
+            sm = plt.cm.ScalarMappable(cmap="viridis", norm=plt.Normalize(vmin=vmin, vmax=vmax))
+            cbar = plt.colorbar(sm, cax=cbar_ax, orientation="horizontal")
+            cbar.set_label('feature_key', fontsize=14)
             plt.subplots_adjust(left=0.15)
+
             plt.show()
 
     # Colorbar and layout adjustments for single-figure mode
