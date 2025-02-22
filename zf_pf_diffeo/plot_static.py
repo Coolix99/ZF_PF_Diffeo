@@ -111,7 +111,7 @@ def plot_all_reference_data(base_dir, data_to_value_function, scale_unit="µm", 
             hist_data = np.load(npz_hist_file, allow_pickle=True)
             hist_data_map[folder] = hist_data
             all_plot_values.append(data_to_value_function(hist_data))
-
+            
     if not all_plot_values:
         print(f"No valid data found.")
         return
@@ -144,7 +144,7 @@ def plot_all_reference_data(base_dir, data_to_value_function, scale_unit="µm", 
 
         hist_data = hist_data_map.get(folder, None)
         plot_values = data_to_value_function(hist_data) if hist_data else None
-
+       
         if separate_windows:
             fig, ax = plt.subplots(figsize=(7, 7))
         else:

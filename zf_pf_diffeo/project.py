@@ -87,12 +87,12 @@ def project_df_surface(surface, df, pos_columns, feature_columns):
         np.add.at(pixel_count, nearest_vertex_ids, 1)
 
         # Compute average value per vertex
-        avg_feature = np.zeros(len(vertices))
-        valid = pixel_count > 0  # Avoid division by zero
-        avg_feature[valid] = sum_feature[valid] / pixel_count[valid]
+        #avg_feature = np.zeros(len(vertices))
+        #valid = pixel_count > 0  # Avoid division by zero
+        #avg_feature[valid] = sum_feature[valid] / pixel_count[valid]
 
         # Add averaged feature to the surface
-        surface[feature + "_avg"] = avg_feature
+        surface[feature + "_sum"] = sum_feature
         surface[feature + "_count"] = pixel_count
 
     return surface

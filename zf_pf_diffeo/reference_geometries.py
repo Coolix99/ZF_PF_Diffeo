@@ -1,7 +1,6 @@
 import os
 import pyvista as pv
 import numpy as np
-#import spatial_efd
 import gmsh
 import scipy.sparse as sp
 from scipy.sparse.linalg import spsolve
@@ -10,7 +9,7 @@ import pickle
 from typing import List
 from scipy.interpolate import interp1d
 import logging
-from spatial_efd import AverageCoefficients, inverse_transform
+from spatial_efd import AverageCoefficients, inverse_transform,CloseContour,CalculateEFD
 
 from zf_pf_diffeo.boundary import getBoundary
 
@@ -34,7 +33,7 @@ def transfer_data(nodes, triangle,boundary, mesh:pv.PolyData,n_harmonics,n_coord
 
     theta=np.arctan2(y0, x0)
     coeff_shift=shift_coeff(coeff,-theta)
-    xt, yt = spatial_efd.inverse_transform(coeff_shift, harmonic=n_harmonics,n_coords=n_coords)
+    xt, yt = inverse_transform(coeff_shift, harmonic=n_harmonics,n_coords=n_coords)
 
 
     # Compute the displacement for the boundary nodes
@@ -232,8 +231,8 @@ def getCoeff(polygon, harmonics):
     x, y = polygon[0, :], polygon[1, :]
 
     # Calculate Fourier descriptors
-    X, Y = spatial_efd.CloseContour(x, y)
-    coeffs = spatial_efd.CalculateEFD(X, Y, harmonics=harmonics)
+    X, Y = CloseContour(x, y)
+    coeffs = CalculateEFD(X, Y, harmonics=harmonics)
 
    
 
@@ -481,7 +480,7 @@ def propagate_mesh_backward(last_mesh, interpolated_coeffs):
         current_time = times[t_idx]
         
         # Compute displacement based on Fourier coefficient changes
-        xt, yt = spatial_efd.inverse_transform(interpolated_coeffs[current_time], harmonic=10, n_coords=40)
+        xt, yt = inverse_transform(interpolated_coeffs[current_time], harmonic=10, n_coords=40)
         target_polygon = np.stack((xt, yt)).T
         
         boundary_displacement = target_polygon - nodes[boundary_indices]
@@ -501,7 +500,7 @@ def create_TempRefGeometry(ref_coeffs,times):
     # Generate last time step's mesh
     last_time = max(times)
     last_coeff = interpolated_coeffs[last_time]
-    xt, yt = spatial_efd.inverse_transform(last_coeff, harmonic=10, n_coords=40)
+    xt, yt = inverse_transform(last_coeff, harmonic=10, n_coords=40)
     nodes, triangles = generate_2d_mesh(np.stack((xt, yt)).T, mesh_size=100)
     avgPolygon = np.stack((xt, yt))
     boundary_indices = get_boundary_indices(nodes, avgPolygon.T)  # Extract boundary indices
@@ -602,7 +601,7 @@ def transfer_data_to_reference(nodes, triangles,boundaries, mesh_3d:pv.PolyData,
 
     theta=np.arctan2(y0, x0)
     coeff_shift=shift_coeff(coeff,-theta)
-    xt, yt = spatial_efd.inverse_transform(coeff_shift, harmonic=n_harmonics,n_coords=n_coords)
+    xt, yt = inverse_transform(coeff_shift, harmonic=n_harmonics,n_coords=n_coords)
 
 
     # Compute the displacement for the boundary nodes

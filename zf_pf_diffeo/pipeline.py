@@ -306,11 +306,16 @@ def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir,surfa
         # Iterate through all point data keys
         for key in mesh_3d.point_data.keys():
             values = np.array(mesh_3d.point_data[key])
-
+           
             # Assign values to corresponding reference nodes
             for i, node_idx in enumerate(indices):
                 hist_map[reference_name]["data"][key][node_idx].append(values[i])
-
+        #break
+    # for reference_name, ref_data in hist_map.items():
+    #     print(reference_name)
+    #     print("keys in data",ref_data["data"].keys())
+    #     print("keys in Volume_sum",ref_data["data"]["Volume_sum"].keys())
+    #     print("data for nodes of Volume_sum",ref_data["data"]["Volume_sum"])
     # Process collected data into histograms and statistics
     for reference_name, ref_data in hist_map.items():
         ref_nodes = ref_data["ref_nodes"]
@@ -324,10 +329,11 @@ def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir,surfa
 
                 if values:
                     values = np.array(values)
+                    node_values.append(values)
                 else:
                     node_values.append([])
 
-
+     
             # Store histograms and statistics
             processed_data[f"{key}"] = node_values
 
