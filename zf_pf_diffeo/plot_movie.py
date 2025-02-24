@@ -9,32 +9,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
-
-def add_scale_bar(ax, nodes, scale_unit="µm"):
-    """
-    Adds a scale bar to the plot based on the node size.
-    
-    Args:
-        ax: Matplotlib axis.
-        nodes: Numpy array of shape (N, 2) containing mesh nodes.
-        scale_unit (str): Unit for the scale bar.
-    """
-    min_x, max_x = nodes[:, 0].min(), nodes[:, 0].max()
-    bar_size = round((max_x - min_x) * 0.1, 1)  # 10% of mesh width
-    fontprops = fm.FontProperties(size=12)
-    
-    scalebar = AnchoredSizeBar(ax.transData,
-                               bar_size,
-                               f"{bar_size} {scale_unit}",
-                               loc="lower right",
-                               pad=0.1,
-                               color="black",
-                               frameon=False,
-                               size_vertical=1,
-                               fontproperties=fontprops)
-    ax.add_artist(scalebar)
-
 def movie_temporal_evolution(interpolated_nodes, triangles, save_path=None, scale_unit="µm"):
     """
     Creates a movie of the temporal evolution of interpolated reference geometries.
@@ -128,9 +102,6 @@ def show_temporal_mesh_evolution(directory):
         movie_temporal_evolution(interpolated_nodes, triangles)
     except FileNotFoundError as e:
         logger.error(str(e))
-
-
-
 
 def load_interpolated_hist_data(directory):
     """

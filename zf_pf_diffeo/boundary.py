@@ -29,13 +29,6 @@ def sort_ind(connections):
 def getBoundary(surf:pv.PolyData):
     meshfix = mf.MeshFix(surf.triangulate())
     holes = meshfix.extract_holes()
-    # indices1 = np.arange(len(holes.lines)) % 3 == 1
-    # indices2 = np.arange(len(holes.lines)) % 3 == 2
-    # v1=holes.lines[indices1]
-    # v2=holes.lines[indices2]
-    # result=np.zeros((v1.shape[0],2),dtype=np.uint)
-    # result[:,0] = v1
-    # result[:,1] = v2
 
     boundary_points = holes.points
     boundary_vertex_indices = np.empty(boundary_points.shape[0], dtype=int)
@@ -73,18 +66,12 @@ def getBoundary(surf:pv.PolyData):
             sorted_indices.insert(min(index_a, index_b)+1, t[2])
             continue
 
-    # print("sorted:")
-    # print(sorted_indices)
-
     return sorted_indices[0:-1]
 
 def path_surrounds_point(path_array, p, n):
-    # Calculate vectors from each point to the next
     vectors = np.diff(path_array, axis=0)
-    # Calculate cross products with n
     cross_products = np.cross(vectors, n)
     
-
     # Vector from p to the first point in the path
     vector_to_first_point = path_array - p
 

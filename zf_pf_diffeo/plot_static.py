@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 import matplotlib.font_manager as fm
-
+import logging
+logger = logging.getLogger(__name__)
 
 def add_scale_bar(ax, nodes, scale_unit="µm"):
     """
@@ -53,7 +54,7 @@ def plot_all_reference_meshes(base_dir, scale_unit="µm"):
         npz_file = os.path.join(base_dir, folder, f"{folder}_ref.npz")
         
         if not os.path.exists(npz_file):
-            print(f"Skipping {folder}, no reference mesh found.")
+            logger.warning(f"Skipping {folder}, no reference mesh found.")
             continue
         
         # Load mesh data
@@ -97,7 +98,7 @@ def plot_all_reference_data(base_dir, data_to_value_function, scale_unit="µm", 
     num_meshes = len(subfolders)
 
     if num_meshes == 0:
-        print("No valid data found.")
+        logger.warning(f"No valid data found.")
         return
 
     all_plot_values = []  
@@ -113,7 +114,7 @@ def plot_all_reference_data(base_dir, data_to_value_function, scale_unit="µm", 
             all_plot_values.append(data_to_value_function(hist_data))
             
     if not all_plot_values:
-        print(f"No valid data found.")
+        logger.warning(f"No valid data found.")
         return
 
     all_plot_values = np.concatenate(all_plot_values)
@@ -136,7 +137,7 @@ def plot_all_reference_data(base_dir, data_to_value_function, scale_unit="µm", 
         npz_mesh_file = os.path.join(base_dir, folder, f"{folder}_ref.npz")
 
         if not os.path.exists(npz_mesh_file):
-            print(f"Skipping {folder}, no reference mesh found.")
+            logger.warning(f"Skipping {folder}, no reference mesh found.")
             continue
 
         mesh_data = np.load(npz_mesh_file)

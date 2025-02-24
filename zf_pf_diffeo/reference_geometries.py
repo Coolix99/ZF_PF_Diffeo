@@ -1,11 +1,9 @@
-import os
 import pyvista as pv
 import numpy as np
 import gmsh
 import scipy.sparse as sp
 from scipy.sparse.linalg import spsolve
 from scipy.spatial import cKDTree
-import pickle 
 from typing import List
 from scipy.interpolate import interp1d
 import logging
@@ -15,201 +13,6 @@ from zf_pf_diffeo.boundary import getBoundary
 
 
 logger = logging.getLogger(__name__)
-
-def filter_outliers(data, n_std=3):
-    mean = np.mean(data)
-    std = np.std(data)
-    filtered = np.where(np.abs(data - mean) > n_std * std, np.nan, data)
-    return filtered
-
-def transfer_data(nodes, triangle,boundary, mesh:pv.PolyData,n_harmonics,n_coords):
-    #print(mesh.point_data)
-    polygon = getPolygon(mesh)
-    centroid = centroid_Polygon(polygon[0, :], polygon[1, :])
-    
-    coeff = getCoeff(polygon, n_harmonics)
-    x0=np.sum(coeff[:,2])
-    y0=np.sum(coeff[:,0])
-
-    theta=np.arctan2(y0, x0)
-    coeff_shift=shift_coeff(coeff,-theta)
-    xt, yt = inverse_transform(coeff_shift, harmonic=n_harmonics,n_coords=n_coords)
-
-
-    # Compute the displacement for the boundary nodes
-    boundary_displacement = np.stack((xt, yt)).T - nodes[boundary]
-    # Solve Laplace equation to propagate the displacement to the interior nodes
-    displacement = solve_laplace(nodes, triangle, boundary, boundary_displacement)
-    # Apply the displacement to the nodes
-    nodes_displaced =nodes.copy() + displacement + centroid
-
-
-    # fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-    # ax.triplot(nodes[:, 0], nodes[:, 1], triangle, color='blue', label='Mesh')
-    # ax.triplot(nodes_displaced[:, 0], nodes_displaced[:, 1], triangle, color='red', label='Mesh displaced')
-    # #ax.plot(polygon[0, :], polygon[1, :], 'g-', label='Polygon', lw=2)
-    # #ax.plot(xt, yt, 'r-', label='Reconstructed Shape', lw=2)
-    # ax.triplot(mesh.point_data['coord_1'], mesh.point_data['coord_2'], mesh.faces.reshape(-1, 4)[:, 1:], color='green', label='Hist mesh')
-    # ax.legend()
-    # ax.set_aspect('equal')
-    # plt.show()
-
-    mesh_coords = np.stack((mesh.point_data['coord_1'], mesh.point_data['coord_2']), axis=1)
-    kdtree = cKDTree(mesh_coords)
-
-    # Find the nearest point in the original mesh for each displaced node
-    distances, indices = kdtree.query(nodes_displaced)
-
-    # Step 5: Create the data dictionary
-    data_dict = {}
-    for key in ['mean_curvature_avg', 'mean_curvature_std', 'gauss_curvature_avg', 'gauss_curvature_std', 'thickness_avg', 'thickness_std', 'mean2-gauss']:
-        # Extract the point data for the given key
-        raw_data = np.array(mesh.point_data[key])
-
-        # Filter out outliers in the raw data
-        filtered_data = filter_outliers(raw_data, n_std=4)
-
-        # Create a mask for non-outlier points
-        valid_indices = ~np.isnan(filtered_data)  # Get valid (non-outlier) indices
-
-        # Create mesh coordinates only for non-outlier points
-        valid_coords_1 = np.array(mesh.point_data['coord_1'])[valid_indices]
-        valid_coords_2 = np.array(mesh.point_data['coord_2'])[valid_indices]
-        mesh_coords = np.stack((valid_coords_1, valid_coords_2), axis=1)
-
-        # Ensure we have valid data points for KDTree
-        if len(mesh_coords) == 0:
-            raise ValueError(f"No valid points left for mesh after filtering outliers for key: {key}")
-
-        # Create KDTree using the valid coordinates
-        kdtree = cKDTree(mesh_coords)
-
-        # Find the nearest point in the original mesh for each displaced node
-        distances, indices = kdtree.query(nodes_displaced)
-
-        # Map the found indices back to the original filtered data
-        data_dict[key] = np.array(filtered_data[valid_indices])[indices]
-
-    # Return the data dictionary with outliers filtered out
-    return data_dict
-
-def linear_interpolate_data(data_dict):
-    # Step 1: Organize the data by category
-    categories = set(category for _, category in data_dict.keys())
-    
-    # Step 2: Loop over each category
-    for category in categories:
-        # Extract all times for the current category
-        category_times = sorted([time for time, cat in data_dict.keys() if cat == category])
-
-        # Find the full range of times (smallest to largest)
-        min_time = min(category_times)
-        max_time = max(category_times)
-        
-        # Generate the full list of times that should be present
-        full_times = list(range(min_time, max_time + 1))
-
-        # Identify missing times
-        missing_times = [time for time in full_times if (time, category) not in data_dict]
-
-        # Step 3: Interpolate for the missing times
-        for missing_time in missing_times:
-            # Find the nearest previous and next times that have data
-            previous_time = max([t for t in category_times if t < missing_time], default=None)
-            next_time = min([t for t in category_times if t > missing_time], default=None)
-
-            if previous_time is not None and next_time is not None:
-                # Get the data for the previous and next times
-                data_prev = data_dict[(previous_time, category)]
-                data_next = data_dict[(next_time, category)]
-
-                # Interpolate each data field
-                interpolated_data = {}
-                for key in data_prev.keys():
-                    value_prev = data_prev[key]
-                    value_next = data_next[key]
-
-                    # Linear interpolation for each field
-                    interpolated_value = value_prev + (value_next - value_prev) * (
-                        (missing_time - previous_time) / (next_time - previous_time)
-                    )
-
-                    interpolated_data[key] = interpolated_value
-
-                # Store the interpolated data in the dictionary
-                data_dict[(missing_time, category)] = interpolated_data
-
-            else:
-                print(f"Warning: Cannot interpolate data for time {missing_time} in category {category}")
-
-    return data_dict
-
-def save_data_dict(data_dict, save_path, file_name="data_dict.pkl"):
-    # Ensure the directory exists
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
-    
-    # Define the full file path
-    file_path = os.path.join(save_path, file_name)
-
-    # Save the data_dict using pickle
-    with open(file_path, 'wb') as f:
-        pickle.dump(data_dict, f)
-
-    print(f"Data dictionary saved successfully to {file_path}")
-
-def load_data_dict(save_path, file_name="data_dict.pkl"):
-    # Define the full file path
-    file_path = os.path.join(save_path, file_name)
-
-    # Load the data_dict using pickle
-    with open(file_path, 'rb') as f:
-        data_dict = pickle.load(f)
-
-    print(f"Data dictionary loaded successfully from {file_path}")
-    return data_dict
-
-
-def create_data_series():
-    load_interpolated_data=None
-    AvgShape_path=None
-    getData=None
-    
-    interpolated_nodes, triangles,boundaries=load_interpolated_data(AvgShape_path)
-    times, categories, meshs=getData()
-    
-    data_dict = {}
-    # Loop through each mesh, time, and category
-    for i, (time, category, mesh) in enumerate(zip(times, categories, meshs)):
-        # Find the corresponding node and triangle data
-        nodes = interpolated_nodes.get((time, category))
-        triangle = triangles.get(category)
-        boundary = boundaries.get(category)
-
-        # Check if nodes and triangle exist for this time and category
-        if nodes is not None and triangle is not None:
-            # Call the transfer_data function
-            data = transfer_data(nodes, triangle,boundary, mesh)
-            
-            # Store the resulting data dict
-            data_dict[(time, category)] = data
-
-
-        else:
-            print(f"Warning: No interpolation found for time {time} and category {category}")
-
-    print(len(data_dict))
-
-    #debug_mesh_time_evolution(interpolated_nodes, triangles, data_dict, 'gauss_curvature_avg',vlim=(-2e-4,2e-4))
-    linear_interpolate_data(data_dict)
-    print(len(data_dict))
-    save_data_dict(data_dict,AvgShape_path)
-
-##########new
-
-
-
-
 
 
 def get_boundary_indices(nodes, boundary_points):
@@ -267,29 +70,6 @@ def getPolygon(mesh_3d: pv.PolyData,debug=False):
     bc1 = mesh_3d.point_data['coord_1'][unique_boundary_indices]
     bc2 = mesh_3d.point_data['coord_2'][unique_boundary_indices]
     
-    
-    # if np.array_equal(boundary_indices, unique_boundary_indices):
-    #     print("No duplicates: Both arrays are the same.")
-    # else:
-    #     print("Duplicates found: Arrays are different.")
-    #     print(boundary_indices)
-    #     print(unique_boundary_indices)
-    #     import matplotlib.pyplot as plt
-    #     x, y = bc1, bc2
-    #     plt.figure(figsize=(6, 6))
-    #     plt.plot(x, y, 'ro-', label="Polygon Boundary")
-    #     plt.fill(x, y, alpha=0.2, color='blue', label="Filled Area")  # Optional fill
-
-    #     bc1 = mesh_3d.point_data['coord_1'][unique_boundary_indices]
-    #     bc2 = mesh_3d.point_data['coord_2'][unique_boundary_indices]
-
-    #     x, y = bc1, bc2
-    #     plt.plot(x, y, 'go-', label="Polygon Boundary")
-    #     #plt.fill(x, y, alpha=0.2, color='blue', label="Filled Area")  # Optional fill
-
-    #     plt.axis("equal")
-    #     plt.legend()
-    #     plt.show()
     centroid = centroid_Polygon(bc1, bc2)
     polygon = np.stack((bc1, bc2))
 
@@ -611,48 +391,13 @@ def transfer_data_to_reference(nodes, triangles,boundaries, mesh_3d:pv.PolyData,
     # Apply the displacement to the nodes
     nodes_displaced =nodes.copy() + displacement + centroid
 
-
     # Build KDTree for nearest neighbor search
     mesh_coords = np.column_stack((mesh_3d.point_data["coord_1"], mesh_3d.point_data["coord_2"]))
 
-    # # 🔹 **Debugging Plots**
-    # import matplotlib.pyplot as plt
-    # plt.figure(figsize=(8, 8))
-    
-    # # Plot Original Nodes
-    # plt.scatter(nodes[:, 0], nodes[:, 1], color='blue', label="Original Nodes", alpha=0.5)
-    
-    # # Plot Displaced Nodes
-    # plt.scatter(nodes_displaced[:, 0], nodes_displaced[:, 1], color='red', label="Displaced Nodes", alpha=0.5)
-    
-    # # Plot Mesh Coordinates
-    # plt.scatter(mesh_coords[:, 0], mesh_coords[:, 1], color='green', label="Mesh Coordinates", marker='x', alpha=0.5)
-
-    # # Titles and Legends
-    # plt.title("Debugging Visualization: Nodes & Mesh Coordinates")
-    # plt.xlabel("X Coordinates")
-    # plt.ylabel("Y Coordinates")
-    # plt.legend()
-    # plt.axis('equal')
-    # plt.show()
-
-
+  
     kdtree = cKDTree(nodes_displaced)
 
     # Find nearest neighbors
     distances, indices = kdtree.query(mesh_coords)
     return indices
-    print(indices.shape, np.max(indices))
-    print(mesh_coords.shape)
-    print(nodes_displaced.shape)
-    # Transfer data
-    data_dict = {}
-    for key in mesh_3d.point_data.keys():
-        raw_data = np.array(mesh_3d.point_data[key])
-        data_dict[key] = None
-
-        print(data_dict[key])
-    raise
-
-    return data_dict
-
+    

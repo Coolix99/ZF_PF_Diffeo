@@ -311,12 +311,7 @@ def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir,surfa
             for i, node_idx in enumerate(indices):
                 hist_map[reference_name]["data"][key][node_idx].append(values[i])
         #break
-    # for reference_name, ref_data in hist_map.items():
-    #     print(reference_name)
-    #     print("keys in data",ref_data["data"].keys())
-    #     print("keys in Volume_sum",ref_data["data"]["Volume_sum"].keys())
-    #     print("data for nodes of Volume_sum",ref_data["data"]["Volume_sum"])
-    # Process collected data into histograms and statistics
+
     for reference_name, ref_data in hist_map.items():
         ref_nodes = ref_data["ref_nodes"]
         processed_data = {}
@@ -355,8 +350,6 @@ def do_HistPointData(surface_dir, reference_dir, category_keys, output_dir,surfa
 
     logger.info("Histogram processing completed.")
 
-
-
 def get_temp_reference_geometry(temp_maps_dir, temp_key,category_keys, metadata,surface_key):
     """
     Finds the correct reference geometry file based on metadata.
@@ -384,7 +377,6 @@ def get_temp_reference_geometry(temp_maps_dir, temp_key,category_keys, metadata,
     nodes_t = interpolated_nodes[str(time)]
     last_mesh = np.load(last_mesh_file)
     return nodes_t, last_mesh["triangles"], last_mesh["boundary_indices"],reference_name,time
-
 
 def do_temporalHistInterpolation(surface_dir, temp_maps_dir, temp_key, category_keys, value_functions, surface_key="Thickness_MetaData", surface_file_key="Surface file"):
     """
@@ -456,17 +448,13 @@ def do_temporalHistInterpolation(surface_dir, temp_maps_dir, temp_key, category_
         ref_nodes = ref_data["ref_nodes"]
         collected_times = sorted(ref_data["times"])
 
-        print(reference_name)
-        print(hist_map[reference_name]["data"].keys())
-        print(hist_map[reference_name]["data"][60].keys())
-
         # Ensure all intermediate times exist
         min_time, max_time = min(collected_times), max(collected_times)
         full_time_range = list(range(min_time, max_time + 1))  # Fill gaps in time
 
         processed_data = {}
 
-        # Step 1: Process raw histogram data (before applying value functions)
+       
         structured_histograms = {}  # Store per time
 
         for time in collected_times:
@@ -486,17 +474,15 @@ def do_temporalHistInterpolation(surface_dir, temp_maps_dir, temp_key, category_
 
                 structured_histograms[time][feature_key] = np.array(structured_data, dtype=object)
                
-        # Step 2: Apply all value functions
+        
         for feature_key, func in value_functions.items():
             extracted_values = {}
 
             for time in collected_times:
-                print(time)
 
                 if time in structured_histograms:
                     extracted_values[time] = func(structured_histograms[time])
-                    #print(extracted_values[time])
-                    print(extracted_values[time].shape)
+                   
 
             # Convert to sorted numpy arrays for interpolation
             times_with_data = np.array(sorted(extracted_values.keys()))
